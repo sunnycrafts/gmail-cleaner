@@ -4,7 +4,7 @@ from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt, QTimer
 from qfluentwidgets import setTheme, Theme, setThemeColor
 import gmail_backend as gb
-import gmail_cleaner_fluent as ui
+from ui.app import GmailCleaner
 
 def fake_senders(n=60):
     names = [("Amazon","deals@amazon.com","order shipped"),
@@ -45,7 +45,7 @@ def run():
     app = QApplication(sys.argv)
     setTheme(theme)
     setThemeColor("#0067C0")
-    win = ui.GmailCleaner()
+    win = GmailCleaner()
     win.senders = fake_senders(80)
     win.summary = gb.summarize(win.senders)
 
@@ -76,6 +76,9 @@ def run():
     win.show()
 
     def shoot():
+        win.stack.setCurrentWidget(win.connect_page)
+        win.connect_page._reveal()
+        win.grab().save(f"smoke_connect_{tag}.png")
         win.stack.setCurrentWidget(win.welcome_page)
         win.grab().save(f"smoke_welcome_{tag}.png")
         win.stack.setCurrentWidget(win.dash_page)
