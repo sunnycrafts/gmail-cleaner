@@ -29,7 +29,15 @@ import logging.handlers
 import urllib.request
 import urllib.error
 import socket
+import json
 from typing import TypedDict, Optional
+
+try:
+    import keyring
+    import keyring.errors
+    KEYRING_AVAILABLE = True
+except Exception:
+    KEYRING_AVAILABLE = False
 
 # ---- opt-in diagnostics logging --------------------------------------------
 # OFF by default: no file is written and nothing is logged unless the user
@@ -453,6 +461,73 @@ def query_match(rec, query):
 def chunks(seq, n):
     for i in range(0, len(seq), n):
         yield seq[i:i + n]
+
+
+# ---- credential storage (opt-in "Remember me") -----------------------------
+# The App Password itself is never written to disk in plaintext. If the user
+# opts in, it goes to the OS-encrypted credential store (Windows Credential
+# Manager via `keyring`) — the same store Windows itself uses for saved
+# network/website passwords. The email address is not a secret (it's already
+# visible in the UI), so it's cached separately in a small local JSON file
+# purely to prefill the field — never the password.
+KEYRING_SERVICE = "GmailInboxCleaner"
+
+
+def _settings_path():
+    base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+    return os.path.join(base, "GmailCleaner", "settings.json")
+
+
+def load_last_address():
+    """Non-secret convenience only — never used to store or imply a password."""
+    try:
+        with open(_settings_path(), encoding="utf-8") as f:
+            return json.load(f).get("last_address", "")
+    except Exception:
+        return ""
+
+
+def save_last_address(addr):
+    path = _settings_path()
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"last_address": addr}, f)
+    except Exception as e:
+        log.debug("save_last_address failed: %s", e)
+
+
+def remember_password(addr, pwd):
+    """Store the App Password in the OS credential store. Returns False (and
+    logs, if diagnostics are on) if no OS credential store is available —
+    the app must keep working without this feature, not crash."""
+    if not KEYRING_AVAILABLE:
+        return False
+    try:
+        keyring.set_password(KEYRING_SERVICE, addr, pwd)
+        return True
+    except Exception as e:
+        log.warning("remember_password failed: %s", e)
+        return False
+
+
+def recall_password(addr):
+    if not KEYRING_AVAILABLE or not addr:
+        return ""
+    try:
+        return keyring.get_password(KEYRING_SERVICE, addr) or ""
+    except Exception as e:
+        log.debug("recall_password failed: %s", e)
+        return ""
+
+
+def forget_password(addr):
+    if not KEYRING_AVAILABLE or not addr:
+        return
+    try:
+        keyring.delete_password(KEYRING_SERVICE, addr)
+    except Exception as e:
+        log.debug("forget_password failed (likely nothing was stored): %s", e)
 
 
 def connect(addr, pwd, retries=NETWORK_RETRIES):

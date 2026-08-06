@@ -185,6 +185,60 @@ def test_diagnostics_toggle(tmp_path=None):
     print("diagnostics toggle OK ->", path)
 
 
+def test_credential_storage():
+    # Use an in-memory fake instead of the real OS credential store so tests
+    # never write to the actual Windows Credential Manager.
+    store = {}
+
+    def fake_set(service, addr, pwd):
+        store[(service, addr)] = pwd
+
+    def fake_get(service, addr):
+        return store.get((service, addr))
+
+    def fake_delete(service, addr):
+        if (service, addr) not in store:
+            raise KeyError("not found")
+        del store[(service, addr)]
+
+    with patch("gmail_backend.KEYRING_AVAILABLE", True), \
+         patch("gmail_backend.keyring.set_password", side_effect=fake_set), \
+         patch("gmail_backend.keyring.get_password", side_effect=fake_get), \
+         patch("gmail_backend.keyring.delete_password", side_effect=fake_delete):
+        assert gb.recall_password("a@gmail.com") == ""
+        assert gb.remember_password("a@gmail.com", "secret123") is True
+        assert gb.recall_password("a@gmail.com") == "secret123"
+        gb.forget_password("a@gmail.com")
+        assert gb.recall_password("a@gmail.com") == ""
+        gb.forget_password("a@gmail.com")  # forgetting twice must not raise
+
+    # KEYRING_AVAILABLE = False must degrade gracefully, never raise.
+    with patch("gmail_backend.KEYRING_AVAILABLE", False):
+        assert gb.remember_password("a@gmail.com", "x") is False
+        assert gb.recall_password("a@gmail.com") == ""
+        gb.forget_password("a@gmail.com")  # no-op, must not raise
+    print("credential storage OK (mocked, no real OS store touched)")
+
+
+def test_last_address_roundtrip():
+    path = gb._settings_path()
+    existed = os.path.exists(path)
+    backup = None
+    if existed:
+        with open(path, encoding="utf-8") as f:
+            backup = f.read()
+    try:
+        gb.save_last_address("someone@gmail.com")
+        assert gb.load_last_address() == "someone@gmail.com"
+    finally:
+        if backup is not None:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(backup)
+        elif os.path.exists(path):
+            os.remove(path)
+    print("last-address roundtrip OK")
+
+
 def test_one_click_retry_behavior():
     # 4xx must fail fast: no sleep, no retries beyond the first attempt.
     calls = []
@@ -224,5 +278,7 @@ if __name__ == "__main__":
     test_parse_unsub()
     test_diagnostics_off_by_default()
     test_diagnostics_toggle()
+    test_credential_storage()
+    test_last_address_roundtrip()
     test_one_click_retry_behavior()
     print("\nAll backend tests passed ✅")

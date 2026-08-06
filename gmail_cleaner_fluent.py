@@ -384,7 +384,9 @@ class ConnectPage(QWidget):
         subtitle.setStyleSheet("color: #888;")
         note = BodyLabel(
             "This app only looks at who emailed you — never the contents of your "
-            "messages. Your password stays on this computer and is never saved.")
+            "messages. Your password is only stored on this computer if you "
+            "choose \"Remember me\" below — and even then, in Windows' own "
+            "encrypted credential store, never as plain text.")
         note.setWordWrap(True)
         note.setStyleSheet("color: #999;")
         cl.addWidget(title)
@@ -414,6 +416,25 @@ class ConnectPage(QWidget):
         cg.addWidget(self.email)
         cg.addWidget(BodyLabel("App Password"))
         cg.addWidget(self.pwd)
+
+        self.remember_check = CheckBox("Remember me on this computer")
+        self.remember_check.setToolTip(
+            "Stores your App Password in Windows' own encrypted credential "
+            "store (Credential Manager) — the same place Windows keeps saved "
+            "network and website passwords. Never written as plain text.")
+        self.remember_check.setAccessibleName(
+            "Remember me on this computer, stores password in Windows Credential Manager")
+        cg.addWidget(self.remember_check)
+
+        # prefill from a prior session, if any (email is non-secret; password
+        # only comes back if it was actually remembered last time)
+        last_addr = gb.load_last_address()
+        if last_addr:
+            self.email.setText(last_addr)
+            saved_pwd = gb.recall_password(last_addr)
+            if saved_pwd:
+                self.pwd.setText(saved_pwd)
+                self.remember_check.setChecked(True)
 
         self.diag_check = CheckBox("Save diagnostic logs (advanced)")
         self.diag_check.setToolTip(
@@ -475,6 +496,9 @@ class ConnectPage(QWidget):
         if self.diag_check.isChecked():
             InfoBar.info("Diagnostics on", f"Logging to {log_path}",
                          parent=self.window(), position=InfoBarPosition.TOP, duration=4000)
+        # Only actually persist/forget the credential once the connection is
+        # confirmed to work (see GmailCleaner._scan_done) — never on a typo.
+        self.main.remember_choice = self.remember_check.isChecked()
         self.main.start_scan(addr, pwd)
 
 
@@ -1111,6 +1135,7 @@ class GmailCleaner(QWidget):
         self.setMinimumSize(900, 600)
 
         self.addr = self.pwd = ""
+        self.remember_choice = False
         self.goal = "tidy"
         self.original_total = 0
         self.senders = {}
@@ -1172,6 +1197,15 @@ class GmailCleaner(QWidget):
         self.scan_worker.start()
 
     def _scan_done(self, res):
+        # Only now, with a confirmed-working connection, act on the
+        # remember-me choice — never persist (or wipe) a credential we
+        # haven't actually verified works.
+        gb.save_last_address(self.addr)
+        if self.remember_choice:
+            gb.remember_password(self.addr, self.pwd)
+        else:
+            gb.forget_password(self.addr)
+
         self.senders = res["senders"]
         self.summary = gb.summarize(self.senders)
         self.original_total = self.summary["total_mail"]
