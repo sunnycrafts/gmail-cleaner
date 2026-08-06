@@ -26,6 +26,12 @@ USING IT
   1. Pick a goal on the welcome screen (Just tidy up / Free up storage /
      Remove newsletters / Archive old mail).
   2. Click "Connect Gmail", enter your address + paste the App Password.
+     - "Remember me on this computer" (optional): saves the password in
+       Windows' own encrypted Credential Manager, never as plain text, and
+       only after a real successful connection.
+     - "Save diagnostic logs (advanced)" (optional, off by default): writes a
+       technical log to %LOCALAPPDATA%\GmailCleaner\logs\ if you ever need to
+       troubleshoot a problem. Never logs your password or email content.
   3. Click "Scan my inbox" (a 7,000-email inbox takes a couple of minutes).
   4. Read the dashboard: your Inbox Health score, three recommended next steps,
      and "What we noticed" insights. Click "Show inbox details" for the full stats.
@@ -44,10 +50,12 @@ USING IT
   8. Click "Finish" any time to see what you accomplished.
 
 FILES
-  gmail_cleaner_fluent.py .. the app (Fluent UI)
-  gmail_backend.py ......... the IMAP engine (no GUI; unit-tested)
-  test_backend.py .......... offline tests for the engine
-  gmail_cleaner.py ......... older zero-dependency Tkinter version (still works)
+  gmail_cleaner_fluent.py .. entry point (thin shim into the ui/ package)
+  ui/ ....................... the Fluent UI, split by page/concern
+  gmail_backend.py .......... the IMAP engine (no GUI; unit-tested)
+  test_backend.py ........... offline tests for the engine
+  run_checks.py .............. runs test_backend.py + smoke_ui.py as one gate
+  gmail_cleaner.py ........... older zero-dependency Tkinter version (still works)
 
 SAFE BY DESIGN
   - Scanning only READS your inbox (opened read-only); it changes nothing.

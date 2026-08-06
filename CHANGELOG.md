@@ -3,6 +3,52 @@
 All notable changes to this project are documented here.
 This project follows semantic versioning.
 
+## [1.4.0] — 2026-08-06
+
+Remediation release — implements the technical-debt findings from the
+code-backed engineering review, in priority order (High → Low).
+
+### Added
+- **Git version control** for the project (was previously untracked). Baseline
+  commit captures the working v1.3.0 state before this release's changes.
+- **`run_checks.py`** — a CI-lite gate wrapping the backend test suite and the
+  UI smoke test into one pass/fail command; now the mandatory pre-build step.
+- **`SenderRecord` TypedDict** documenting the sender-record schema for static
+  type checking / IDE autocomplete (no runtime behavior change — still a plain
+  dict everywhere).
+- **Retry with exponential backoff** for `connect()` (transient network errors
+  only — never a bad password, to avoid triggering Gmail's suspicious-login
+  flagging) and `one_click_unsubscribe()` (transient/5xx only — 4xx fails fast
+  since retrying a rejected request won't help).
+- **Opt-in diagnostics logging** — off by default; a "Save diagnostic logs
+  (advanced)" checkbox on Connect turns on a rotating log file at
+  `%LOCALAPPDATA%\GmailCleaner\logs\`. Never logs passwords or email content.
+- **"Remember me" credential storage** — opt-in, stores the App Password in
+  Windows Credential Manager via `keyring` (never plaintext on disk), and only
+  after a *confirmed-working* connection, never on a typo. Email address is
+  cached separately (non-secret) to prefill the field next time.
+- **UI split into a package** — `gmail_cleaner_fluent.py` (1,432 lines, 12
+  classes) is now a 14-line entry-point shim over a new `ui/` package
+  (`theme.py`, `utils.py`, `workers.py`, `widgets.py`, `pages/*.py`, `app.py`).
+  No behavior change — verified via `run_checks.py` and a live app launch
+  through the new entry point.
+
+### Fixed
+- Removed a redundant `PROTECTED_CATEGORIES` confidence penalty in `assess()`
+  that only affected an already-unused numeric value for protected senders.
+
+### Notes
+- Both distributables (`--collect-all keyring` added to the PyInstaller
+  command, alongside the existing `--collect-all qfluentwidgets`) were
+  rebuilt and verified to launch — portable and the *installed* copy after a
+  silent install. The build log showed no keyring-related warnings, consistent
+  with the metadata being bundled correctly; a full credential-manager
+  write/read round-trip from inside the frozen EXE itself was not separately
+  exercised beyond the app launching without error.
+- Deferred (not in this release): a real MailProvider abstraction (Outlook/
+  other-provider support), memory/perf work (measured as a non-issue at
+  current scale), verified screen-reader support, Mica/acrylic visual polish.
+
 ## [1.3.0] — 2026-07-31
 
 Unsubscribe release.

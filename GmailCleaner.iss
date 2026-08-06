@@ -1,6 +1,6 @@
 ; Inno Setup script for Gmail Inbox Cleaner
 #define MyAppName "Gmail Inbox Cleaner"
-#define MyAppVersion "1.3.0"
+#define MyAppVersion "1.4.0"
 #define MyAppPublisher "Sunny"
 #define MyAppExe "GmailCleaner.exe"
 
