@@ -58,6 +58,7 @@ def run():
     win.senders_page.populate(win.senders)
     win.senders_page._select_bulk()
     assert win.senders_page.unsub_btn.isEnabled(), "unsub button should enable on bulk selection"
+    assert win.senders_page.label_btn.isEnabled(), "label button should enable on bulk selection"
     # natural-language search + lazy paging
     win.senders_page.search.setText("older than 1 year unread")
     win.senders_page.search.setText("")

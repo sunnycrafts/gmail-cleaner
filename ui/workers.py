@@ -66,3 +66,26 @@ class UnsubscribeWorker(QThread):
             self.done.emit(ok, len(self.urls))
         except Exception as e:
             self.failed.emit(str(e))
+
+
+class LabelWorker(QThread):
+    """Applies one or more (label, uids) groups. Additive-only — never moves
+    or deletes anything, so a failure partway through just leaves fewer
+    labels applied than intended, not a broken inbox."""
+    progress = Signal(int, int)   # groups done, groups total
+    done = Signal(int, int)       # total emails tagged, groups done
+    failed = Signal(str)
+
+    def __init__(self, addr, pwd, groups):
+        super().__init__()
+        self.addr, self.pwd, self.groups = addr, pwd, groups
+
+    def run(self):
+        try:
+            total_tagged = 0
+            for i, (label, uids) in enumerate(self.groups, start=1):
+                total_tagged += gb.apply_label(self.addr, self.pwd, uids, label)
+                self.progress.emit(i, len(self.groups))
+            self.done.emit(total_tagged, len(self.groups))
+        except Exception as e:
+            self.failed.emit(str(e))

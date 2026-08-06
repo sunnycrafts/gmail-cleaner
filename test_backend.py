@@ -239,6 +239,22 @@ def test_last_address_roundtrip():
     print("last-address roundtrip OK")
 
 
+def test_label_helpers():
+    # quoting: spaces/slashes are fine bare, but must be wrapped; embedded
+    # quotes/backslashes must be escaped so the IMAP literal stays valid.
+    assert gb._imap_quoted("Cleanup/Shopping") == '"Cleanup/Shopping"'
+    assert gb._imap_quoted('Weird "Label"') == '"Weird \\"Label\\""'
+    assert gb._imap_quoted("Back\\Slash") == '"Back\\\\Slash"'
+
+    lbl = gb.audit_label_for_today()
+    assert lbl.startswith("Cleaned/")
+    assert len(lbl.split("/")[1]) == 7  # YYYY-MM
+
+    assert gb.category_label("Shopping") == "Cleanup/Shopping"
+    assert gb.category_label("Weekly Digest") == "Cleanup/Weekly Digest"
+    print("label helpers OK ->", lbl)
+
+
 def test_one_click_retry_behavior():
     # 4xx must fail fast: no sleep, no retries beyond the first attempt.
     calls = []
@@ -280,5 +296,6 @@ if __name__ == "__main__":
     test_diagnostics_toggle()
     test_credential_storage()
     test_last_address_roundtrip()
+    test_label_helpers()
     test_one_click_retry_behavior()
     print("\nAll backend tests passed ✅")

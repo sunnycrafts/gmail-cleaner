@@ -3,6 +3,38 @@
 All notable changes to this project are documented here.
 This project follows semantic versioning.
 
+## [1.5.0] — 2026-08-06
+
+Labeling release — two additive-only labeling features, neither of which moves,
+archives, or deletes anything.
+
+### Added
+- **`apply_label()`** in the backend — adds a Gmail label to a set of UIDs.
+  Gmail auto-creates the label if it doesn't already exist (a documented
+  Gmail IMAP extension behavior), so no separate "create label" step is
+  needed. Labels are quoted per IMAP syntax (`_imap_quoted()`) so names with
+  spaces or `/` (Gmail's nesting separator) work correctly.
+- **"Label by category"** button on the Senders page — for the current
+  selection, applies one label per sender category (e.g. `Cleanup/Shopping`,
+  `Cleanup/Social`) to organize the inbox without deleting or moving mail.
+  Shows a confirmation listing exactly which labels/counts will be applied
+  before doing anything.
+- **"Tag cleaned mail with a label"** checkbox (off by default) next to
+  Archive/Trash — when checked, also stamps a `Cleaned/YYYY-MM` label on
+  whatever was just cleaned, as a lightweight audit trail. Runs as a
+  follow-up, non-blocking step after the clean action succeeds; a failure to
+  tag doesn't affect the clean action that already happened.
+- New `LabelWorker` (background thread) applies one or more label groups
+  sequentially without touching the UI thread.
+
+### Notes
+- Both features are purely additive — worst case of a partial failure is
+  "fewer labels applied than intended," never a broken inbox.
+- Label-application itself isn't covered by an automated test (same reason
+  `do_action`/`undo_action` aren't — it needs a live IMAP connection); the
+  pure logic around it (`_imap_quoted`, `audit_label_for_today`,
+  `category_label`) is unit-tested offline.
+
 ## [1.4.0] — 2026-08-06
 
 Remediation release — implements the technical-debt findings from the

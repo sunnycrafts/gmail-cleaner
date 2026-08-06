@@ -821,3 +821,54 @@ def undo_action(addr, pwd, uids, mode, progress=None):
             M.logout()
         except Exception as e:
             log.debug("undo_action: logout failed (%s) — connection likely already closed", e)
+
+
+# ---- labeling ---------------------------------------------------------------
+# Two opt-in labeling features, both additive-only (never move or delete mail):
+#  1. "Audit" labels — stamp Cleaned/YYYY-MM on whatever Trash/Archive touched,
+#     so there's a record of what the app did.
+#  2. "Category" labels — one label per sender category, applied to a whole
+#     selection at once, so the inbox stays organized without deleting anything.
+CLEANED_LABEL_PREFIX = "Cleaned"
+CATEGORY_LABEL_PREFIX = "Cleanup"
+
+
+def _imap_quoted(label):
+    """Quote a label for IMAP: labels can contain spaces/slashes, which the
+    bare-atom syntax used elsewhere (e.g. \\Trash) doesn't allow."""
+    escaped = label.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def audit_label_for_today():
+    return f"{CLEANED_LABEL_PREFIX}/{_now_utc_naive().strftime('%Y-%m')}"
+
+
+def category_label(category):
+    return f"{CATEGORY_LABEL_PREFIX}/{category}"
+
+
+def apply_label(addr, pwd, uids, label, progress=None):
+    """Add a Gmail label to the given UIDs. Never removes a label, never
+    moves or deletes anything. Gmail auto-creates the label if it doesn't
+    already exist — no separate "create label" step is needed."""
+    log.info("apply_label: label=%s uids=%d", label, len(uids))
+    M = connect(addr, pwd)
+    try:
+        M.select("INBOX")  # read-write
+        done = 0
+        total = len(uids)
+        quoted = _imap_quoted(label)
+        for batch in chunks(uids, ACTION_BATCH):
+            uid_set = ",".join(batch)
+            M.uid("STORE", uid_set, "+X-GM-LABELS", quoted)
+            done += len(batch)
+            if progress:
+                progress(done, total)
+        log.info("apply_label: label=%s completed, %d tagged", label, done)
+        return done
+    finally:
+        try:
+            M.logout()
+        except Exception as e:
+            log.debug("apply_label: logout failed (%s) — connection likely already closed", e)

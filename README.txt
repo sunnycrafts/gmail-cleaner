@@ -46,8 +46,14 @@ USING IT
   6. "Unsubscribe" (on selected senders that offer it): one-click senders are
      unsubscribed automatically; the rest open in your browser to finish. Only
      unsubscribe from senders you recognize. This does NOT delete existing mail.
-  7. Made a mistake? Click "Undo" to put those emails right back.
-  8. Click "Finish" any time to see what you accomplished.
+  7. "Label by category" (optional): adds a Gmail label per category to the
+     selected senders (e.g. Cleanup/Shopping) so your inbox stays organized —
+     doesn't move, archive, or delete anything.
+  8. "Tag cleaned mail with a label" (optional, off by default): when checked,
+     Archive/Trash also stamps a "Cleaned/YYYY-MM" label first, as a record
+     of what the app touched.
+  9. Made a mistake? Click "Undo" to put those emails right back.
+  10. Click "Finish" any time to see what you accomplished.
 
 FILES
   gmail_cleaner_fluent.py .. entry point (thin shim into the ui/ package)

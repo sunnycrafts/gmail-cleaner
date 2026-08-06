@@ -7,7 +7,7 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QButtonGroup
 from qfluentwidgets import (
     TitleLabel, BodyLabel, SearchLineEdit, PushButton, PrimaryPushButton,
     TransparentPushButton, TransparentToolButton, PillPushButton, FlowLayout,
-    SingleDirectionScrollArea, MessageBox, FluentIcon as FIF,
+    SingleDirectionScrollArea, MessageBox, CheckBox, FluentIcon as FIF,
 )
 
 import gmail_backend as gb
@@ -74,6 +74,30 @@ class SendersPage(QWidget):
         self.lv.setSpacing(8)
         self.scroll.setWidget(self.listbody)
         root.addWidget(self.scroll, 1)
+
+        # labeling row — additive-only, separate from Archive/Trash below
+        label_row = QHBoxLayout()
+        self.label_btn = PushButton("Label by category")
+        self.label_btn.setIcon(FIF.TAG)
+        self.label_btn.setToolTip(
+            "Adds a Gmail label per category to the selected senders "
+            "(e.g. Cleanup/Shopping) — doesn't move, archive, or delete anything.")
+        self.label_btn.setAccessibleName(
+            "Label by category. Adds a label, does not move or delete anything.")
+        self.label_btn.setEnabled(False)
+        self.label_btn.clicked.connect(self._label_selected)
+        label_row.addWidget(self.label_btn)
+
+        self.audit_check = CheckBox("Tag cleaned mail with a label")
+        self.audit_check.setToolTip(
+            "When you Archive or Trash below, also add a "
+            "\"Cleaned/YYYY-MM\" label first, so you have a record of what "
+            "this app touched. Off by default.")
+        self.audit_check.setAccessibleName(
+            "Tag cleaned mail with a Cleaned label, off by default")
+        label_row.addWidget(self.audit_check)
+        label_row.addStretch(1)
+        root.addLayout(label_row)
 
         # quick-select + action bar
         bar = QHBoxLayout()
@@ -219,11 +243,17 @@ class SendersPage(QWidget):
                         or self.main.senders.get(e, {}).get("unsub_mailto")
                         for e in self.selected)
         self.unsub_btn.setEnabled(can_unsub)
+        self.label_btn.setEnabled(n > 0)
 
     def _unsubscribe(self):
         targets = [e for e in self.selected if e in self.main.senders]
         if targets:
             self.main.run_unsubscribe(targets)
+
+    def _label_selected(self):
+        targets = [e for e in self.selected if e in self.main.senders]
+        if targets:
+            self.main.run_label_by_category(targets)
 
     def set_undo_enabled(self, on):
         self.undo_btn.setEnabled(on)

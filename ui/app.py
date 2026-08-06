@@ -18,7 +18,7 @@ from qfluentwidgets import (
 )
 
 import gmail_backend as gb
-from ui.workers import ScanWorker, ActionWorker, UnsubscribeWorker
+from ui.workers import ScanWorker, ActionWorker, UnsubscribeWorker, LabelWorker
 from ui.pages.welcome import WelcomePage
 from ui.pages.connect import ConnectPage
 from ui.pages.scan import ScanPage
@@ -242,11 +242,55 @@ class GmailCleaner(QWidget):
                         + (" Some may take a day or two to take effect." if ok else ""),
                         parent=self, position=InfoBarPosition.TOP, duration=6000)
 
+    # -------- labeling (additive-only: never moves or deletes anything)
+    def run_label_by_category(self, targets):
+        groups_map = {}
+        for e in targets:
+            rec = self.senders.get(e)
+            if not rec:
+                continue
+            groups_map.setdefault(rec["category"], []).extend(rec["uids"])
+        if not groups_map:
+            return
+
+        lines = [f"• {gb.category_label(cat)} — {len(uids):,} emails"
+                 for cat, uids in groups_map.items()]
+        box = MessageBox(
+            "Label senders by category?",
+            "This ADDS a label to each email — nothing is moved, archived, "
+            "or deleted.\n\n" + "\n".join(lines) +
+            "\n\nGmail creates these labels automatically if they don't exist yet.",
+            self)
+        box.yesButton.setText("Add labels")
+        if not box.exec():
+            return
+
+        groups = [(gb.category_label(cat), uids) for cat, uids in groups_map.items()]
+        total = sum(len(uids) for _, uids in groups)
+        self.label_worker = LabelWorker(self.addr, self.pwd, groups)
+        self.label_worker.done.connect(self._label_done)
+        self.label_worker.failed.connect(
+            lambda m: InfoBar.error("Labeling failed", m, parent=self,
+                                    position=InfoBarPosition.TOP, duration=8000))
+        self.label_worker.start()
+        InfoBar.info("Labeling…",
+                     f"Adding labels to {total:,} emails across {len(groups)} "
+                     f"categor{'y' if len(groups) == 1 else 'ies'}.",
+                     parent=self, position=InfoBarPosition.TOP, duration=3000)
+
+    def _label_done(self, total_tagged, n_groups):
+        InfoBar.success(
+            "Labeled",
+            f"{total_tagged:,} emails tagged across {n_groups} "
+            f"categor{'y' if n_groups == 1 else 'ies'}.",
+            parent=self, position=InfoBarPosition.TOP, duration=5000)
+
     # -------- action flow
     def run_action(self, mode, uids, targets):
         self._pending = {
             "mode": mode, "targets": targets, "uids": uids,
             "records": {e: self.senders[e] for e in targets if e in self.senders},
+            "audit": self.senders_page.audit_check.isChecked(),
         }
         self.action_worker = ActionWorker(self.addr, self.pwd, uids, mode)
         self.action_worker.done.connect(self._action_done)
@@ -277,6 +321,18 @@ class GmailCleaner(QWidget):
         InfoBar.success("Done", f"{n:,} emails {word}. "
                         f"{len(self.senders):,} senders left in your inbox.",
                         parent=self, position=InfoBarPosition.TOP, duration=5000)
+
+        if p.get("audit") and p["uids"]:
+            label = gb.audit_label_for_today()
+            self._audit_worker = LabelWorker(self.addr, self.pwd, [(label, p["uids"])])
+            self._audit_worker.done.connect(
+                lambda tagged, _g, lbl=label: InfoBar.info(
+                    "Tagged", f"{tagged:,} emails also labeled \"{lbl}\".",
+                    parent=self, position=InfoBarPosition.TOP, duration=3000))
+            self._audit_worker.failed.connect(
+                lambda m: InfoBar.warning("Tagging skipped", m, parent=self,
+                                          position=InfoBarPosition.TOP, duration=5000))
+            self._audit_worker.start()
 
     def _action_failed(self, msg):
         self.senders_page._set_busy(False)
