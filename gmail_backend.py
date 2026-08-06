@@ -10,11 +10,10 @@ Public surface:
     summarize(senders) -> dict
     human_size(n) -> str
 
-A "sender" record is a dict:
-    { name, email, count, unread, bytes, has_unsub, flagged, important, labeled,
-      unsub_url, unsub_mailto, unsub_oneclick,
-      first_date, last_date, subject, category, is_bulk, uids[],
-      protected, stars, confidence, suggestion }
+A "sender" record is a SenderRecord (see below) — still a plain dict at
+runtime (every existing rec["key"] access keeps working unmodified), but now
+typed via TypedDict so a type checker / IDE can catch a missing or misspelled
+field at edit time instead of a bare KeyError at scan time.
 """
 
 import imaplib
@@ -22,13 +21,47 @@ import email
 from email.header import decode_header
 from email.utils import parseaddr, parsedate_to_datetime
 import re
+import time
 import datetime
 import urllib.request
+import urllib.error
+import socket
+from typing import TypedDict, Optional
+
+
+class SenderRecord(TypedDict):
+    name: str
+    email: str
+    count: int
+    unread: int
+    bytes: int
+    has_unsub: bool
+    flagged: int
+    important: int
+    labeled: bool
+    unsub_url: str
+    unsub_mailto: str
+    unsub_oneclick: bool
+    subject: str
+    first_date: Optional[datetime.datetime]
+    last_date: Optional[datetime.datetime]
+    uids: list
+    category: str
+    is_bulk: bool
+    # populated by assess() after classification; absent immediately after
+    # _parse_batch() but always present by the time scan() returns.
+    protected: bool
+    stars: int
+    confidence: float
+    suggestion: str
+
 
 IMAP_HOST = "imap.gmail.com"
 IMAP_PORT = 993
 BATCH = 300
 ACTION_BATCH = 200
+NETWORK_RETRIES = 3
+NETWORK_RETRY_BASE_DELAY = 1.5  # seconds; doubles each retry (1.5, 3, 6)
 
 # Header fields we pull (all cheap — no message bodies are ever downloaded).
 # X-GM-LABELS is a Gmail IMAP extension giving \Important, \Starred, user labels.
@@ -125,19 +158,36 @@ def parse_unsub(list_unsub, list_unsub_post):
     return url, mailto, one_click
 
 
-def one_click_unsubscribe(url, timeout=15):
-    """RFC 8058 one-click POST. Returns True on a 2xx/3xx. https only."""
+def one_click_unsubscribe(url, timeout=15, retries=NETWORK_RETRIES):
+    """RFC 8058 one-click POST. Returns True on a 2xx/3xx. https only.
+
+    Retries with exponential backoff only on transient failures (timeouts,
+    connection errors, 5xx). A 4xx response means the server rejected the
+    request and won't accept it on retry, so those fail fast instead of
+    hammering someone else's unsubscribe endpoint.
+    """
     if not url or not url.lower().startswith("https://"):
         return False
     req = urllib.request.Request(
         url, data=b"List-Unsubscribe=One-Click", method="POST",
         headers={"Content-Type": "application/x-www-form-urlencoded",
                  "User-Agent": "GmailInboxCleaner/1.3"})
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return 200 <= getattr(resp, "status", resp.getcode()) < 400
-    except Exception:
-        return False
+    delay = NETWORK_RETRY_BASE_DELAY
+    for attempt in range(1, retries + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                status = getattr(resp, "status", resp.getcode())
+                return 200 <= status < 400
+        except urllib.error.HTTPError as e:
+            if 400 <= e.code < 500:
+                return False  # rejected — retrying won't change that
+            # 5xx: fall through to retry
+        except Exception:
+            pass  # network/timeout/TLS error — retry
+        if attempt < retries:
+            time.sleep(delay)
+            delay *= 2
+    return False
 
 
 def classify(sender_email, display_name, subject):
@@ -200,8 +250,9 @@ def assess(rec):
         c -= 0.30
     if rec["labeled"]:
         c -= 0.10
-    if rec["category"] in PROTECTED_CATEGORIES:
-        c -= 0.50
+    # Note: no separate PROTECTED_CATEGORIES penalty here — `protected` (above)
+    # already forces suggestion="Protected" regardless of the numeric score,
+    # so a second penalty would only affect an already-unused confidence value.
     confidence = max(0.0, min(1.0, c))
 
     stars = int(round(1 + 4 * confidence))
@@ -361,10 +412,30 @@ def chunks(seq, n):
         yield seq[i:i + n]
 
 
-def connect(addr, pwd):
-    M = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT)
-    M.login(addr, pwd.replace(" ", ""))
-    return M
+def connect(addr, pwd, retries=NETWORK_RETRIES):
+    """Open an authenticated IMAP connection.
+
+    Retries only transient network-level failures (DNS/timeout/connection
+    reset while opening the socket). An IMAP4.error — wrong password, account
+    issue — is never retried: retrying a bad credential a second and third
+    time against Gmail risks the attempt being flagged as suspicious login
+    activity, and it isn't going to succeed anyway.
+    """
+    delay = NETWORK_RETRY_BASE_DELAY
+    last_network_error = None
+    for attempt in range(1, retries + 1):
+        try:
+            M = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT)
+        except (socket.gaierror, socket.timeout, OSError) as e:
+            last_network_error = e
+            if attempt < retries:
+                time.sleep(delay)
+                delay *= 2
+                continue
+            raise
+        M.login(addr, pwd.replace(" ", ""))  # imaplib.IMAP4.error propagates immediately, no retry
+        return M
+    raise last_network_error
 
 
 # ---- scanning -------------------------------------------------------------

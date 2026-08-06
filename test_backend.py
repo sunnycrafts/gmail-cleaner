@@ -1,5 +1,8 @@
 """Offline tests for gmail_backend — no network required."""
 import datetime
+import time
+import urllib.error
+from unittest.mock import patch
 import gmail_backend as gb
 
 
@@ -158,6 +161,32 @@ def test_parse_unsub():
     print("parse_unsub / one_click guard OK")
 
 
+def test_one_click_retry_behavior():
+    # 4xx must fail fast: no sleep, no retries beyond the first attempt.
+    calls = []
+    with patch("gmail_backend.urllib.request.urlopen",
+               side_effect=urllib.error.HTTPError("https://x", 404, "Not Found", {}, None)), \
+         patch("gmail_backend.time.sleep", side_effect=lambda s: calls.append(s)):
+        ok = gb.one_click_unsubscribe("https://ex.com/u")
+    assert ok is False
+    assert calls == [], "4xx must not trigger a retry sleep"
+
+    # Transient failure must retry NETWORK_RETRIES times with backoff, then fail.
+    calls.clear()
+    with patch("gmail_backend.urllib.request.urlopen", side_effect=TimeoutError("timed out")), \
+         patch("gmail_backend.time.sleep", side_effect=lambda s: calls.append(s)):
+        ok = gb.one_click_unsubscribe("https://ex.com/u", retries=3)
+    assert ok is False
+    assert calls == [gb.NETWORK_RETRY_BASE_DELAY, gb.NETWORK_RETRY_BASE_DELAY * 2], calls
+
+    # Non-https is rejected before any network attempt (no retries needed).
+    calls.clear()
+    with patch("gmail_backend.time.sleep", side_effect=lambda s: calls.append(s)):
+        assert gb.one_click_unsubscribe("http://ex.com/u") is False
+    assert calls == []
+    print("one_click retry/backoff behavior OK")
+
+
 if __name__ == "__main__":
     test_human_size()
     test_decode_mime()
@@ -169,4 +198,5 @@ if __name__ == "__main__":
     test_query_match()
     test_insights()
     test_parse_unsub()
+    test_one_click_retry_behavior()
     print("\nAll backend tests passed ✅")
