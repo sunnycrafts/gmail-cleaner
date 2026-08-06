@@ -414,6 +414,16 @@ class ConnectPage(QWidget):
         cg.addWidget(self.email)
         cg.addWidget(BodyLabel("App Password"))
         cg.addWidget(self.pwd)
+
+        self.diag_check = CheckBox("Save diagnostic logs (advanced)")
+        self.diag_check.setToolTip(
+            "Off by default. When on, writes a technical log to help diagnose "
+            "problems if something goes wrong — never your password, and never "
+            "email contents. File: %LOCALAPPDATA%\\GmailCleaner\\logs\\")
+        self.diag_check.setAccessibleName(
+            "Save diagnostic logs, advanced option, off by default")
+        cg.addWidget(self.diag_check)
+
         row = QHBoxLayout()
         help_btn = HyperlinkButton("", "What's an App Password?")
         help_btn.clicked.connect(self._help)
@@ -461,6 +471,10 @@ class ConnectPage(QWidget):
             InfoBar.warning("Missing info", "Enter your Gmail address and App Password.",
                             parent=self.window(), position=InfoBarPosition.TOP, duration=3000)
             return
+        log_path = gb.enable_diagnostics(self.diag_check.isChecked())
+        if self.diag_check.isChecked():
+            InfoBar.info("Diagnostics on", f"Logging to {log_path}",
+                         parent=self.window(), position=InfoBarPosition.TOP, duration=4000)
         self.main.start_scan(addr, pwd)
 
 

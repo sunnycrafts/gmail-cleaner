@@ -1,5 +1,6 @@
 """Offline tests for gmail_backend — no network required."""
 import datetime
+import os
 import time
 import urllib.error
 from unittest.mock import patch
@@ -161,6 +162,29 @@ def test_parse_unsub():
     print("parse_unsub / one_click guard OK")
 
 
+def test_diagnostics_off_by_default():
+    # A fresh import should have no file handler attached and WARNING+ level.
+    assert not any(isinstance(h, __import__("logging").handlers.RotatingFileHandler)
+                   for h in gb.log.handlers)
+    print("diagnostics off-by-default OK")
+
+
+def test_diagnostics_toggle(tmp_path=None):
+    import logging.handlers
+    path = gb.enable_diagnostics(True)
+    assert any(isinstance(h, logging.handlers.RotatingFileHandler) for h in gb.log.handlers)
+    assert gb.log.level == 10  # DEBUG
+    gb.log.info("test line")
+    for h in gb.log.handlers:
+        h.flush()
+    assert os.path.exists(path)
+    with open(path, encoding="utf-8") as f:
+        assert "test line" in f.read()
+    gb.enable_diagnostics(False)
+    assert not any(isinstance(h, logging.handlers.RotatingFileHandler) for h in gb.log.handlers)
+    print("diagnostics toggle OK ->", path)
+
+
 def test_one_click_retry_behavior():
     # 4xx must fail fast: no sleep, no retries beyond the first attempt.
     calls = []
@@ -198,5 +222,7 @@ if __name__ == "__main__":
     test_query_match()
     test_insights()
     test_parse_unsub()
+    test_diagnostics_off_by_default()
+    test_diagnostics_toggle()
     test_one_click_retry_behavior()
     print("\nAll backend tests passed ✅")

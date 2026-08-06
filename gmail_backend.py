@@ -21,12 +21,52 @@ import email
 from email.header import decode_header
 from email.utils import parseaddr, parsedate_to_datetime
 import re
+import os
 import time
 import datetime
+import logging
+import logging.handlers
 import urllib.request
 import urllib.error
 import socket
 from typing import TypedDict, Optional
+
+# ---- opt-in diagnostics logging --------------------------------------------
+# OFF by default: no file is written and nothing is logged unless the user
+# explicitly turns this on (a checkbox in the UI calls enable_diagnostics()).
+# This is deliberately not "log everything always" — see the project's own
+# technical-debt notes: blanket logging on a single-user desktop tool is
+# disproportionate; an opt-in diagnostics mode is the fix that's actually
+# worth its complexity.
+log = logging.getLogger("gmail_cleaner")
+log.addHandler(logging.NullHandler())
+log.propagate = False
+
+
+def diagnostics_log_path():
+    base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+    return os.path.join(base, "GmailCleaner", "logs", "gmail_cleaner.log")
+
+
+def enable_diagnostics(enabled):
+    """Turn the rotating debug log file on/off. Off = default, no file, no I/O."""
+    for h in list(log.handlers):
+        if isinstance(h, logging.handlers.RotatingFileHandler):
+            log.removeHandler(h)
+            h.close()
+    if not enabled:
+        log.setLevel(logging.WARNING)
+        return diagnostics_log_path()
+    path = diagnostics_log_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    handler = logging.handlers.RotatingFileHandler(
+        path, maxBytes=1_000_000, backupCount=2, encoding="utf-8")
+    handler.setFormatter(logging.Formatter(
+        "%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    log.addHandler(handler)
+    log.setLevel(logging.DEBUG)
+    log.info("Diagnostics logging enabled")
+    return path
 
 
 class SenderRecord(TypedDict):
@@ -180,10 +220,13 @@ def one_click_unsubscribe(url, timeout=15, retries=NETWORK_RETRIES):
                 return 200 <= status < 400
         except urllib.error.HTTPError as e:
             if 400 <= e.code < 500:
+                log.debug("one_click_unsubscribe: %s rejected with %s, not retrying", url, e.code)
                 return False  # rejected — retrying won't change that
-            # 5xx: fall through to retry
-        except Exception:
-            pass  # network/timeout/TLS error — retry
+            log.debug("one_click_unsubscribe: %s returned %s, attempt %d/%d",
+                      url, e.code, attempt, retries)
+        except Exception as e:
+            log.debug("one_click_unsubscribe: %s failed (%s), attempt %d/%d",
+                      url, e, attempt, retries)
         if attempt < retries:
             time.sleep(delay)
             delay *= 2
@@ -428,12 +471,17 @@ def connect(addr, pwd, retries=NETWORK_RETRIES):
             M = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT)
         except (socket.gaierror, socket.timeout, OSError) as e:
             last_network_error = e
+            log.debug("connect: network error (%s), attempt %d/%d", e, attempt, retries)
             if attempt < retries:
                 time.sleep(delay)
                 delay *= 2
                 continue
             raise
-        M.login(addr, pwd.replace(" ", ""))  # imaplib.IMAP4.error propagates immediately, no retry
+        try:
+            M.login(addr, pwd.replace(" ", ""))  # imaplib.IMAP4.error propagates immediately, no retry
+        except imaplib.IMAP4.error as e:
+            log.debug("connect: login rejected (%s) — not retrying", e)
+            raise
         return M
     raise last_network_error
 
@@ -489,8 +537,8 @@ def scan(addr, pwd, progress=None, should_stop=None):
     finally:
         try:
             M.logout()
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("scan: logout failed (%s) — connection likely already closed", e)
 
 
 def _parse_batch(msgdata, agg):
@@ -509,7 +557,8 @@ def _parse_batch(msgdata, agg):
 
         try:
             msg = email.message_from_bytes(header_bytes)
-        except Exception:
+        except Exception as e:
+            log.warning("_parse_batch: skipped one unparseable message (uid=%s): %s", uid, e)
             continue
 
         name, e = parseaddr(decode_mime(msg.get("From", "")))
@@ -528,7 +577,8 @@ def _parse_batch(msgdata, agg):
             dt = parsedate_to_datetime(msg.get("Date"))
             if dt and dt.tzinfo:
                 dt = dt.astimezone(datetime.timezone.utc).replace(tzinfo=None)
-        except Exception:
+        except Exception as e:
+            log.debug("_parse_batch: unparseable Date header (uid=%s): %s", uid, e)
             dt = None
 
         rec = agg.get(e)
@@ -648,6 +698,7 @@ def summarize(senders):
 # ---- actions --------------------------------------------------------------
 def do_action(addr, pwd, uids, mode, progress=None):
     """mode = 'trash' or 'archive'. Returns count processed."""
+    log.info("do_action: mode=%s uids=%d", mode, len(uids))
     M = connect(addr, pwd)
     try:
         M.select("INBOX")  # read-write
@@ -663,16 +714,18 @@ def do_action(addr, pwd, uids, mode, progress=None):
             if progress:
                 progress(done, total)
         M.expunge()
+        log.info("do_action: mode=%s completed, %d processed", mode, done)
         return done
     finally:
         try:
             M.logout()
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("do_action: logout failed (%s) — connection likely already closed", e)
 
 
 def undo_action(addr, pwd, uids, mode, progress=None):
     """Reverse the last do_action. Trash -> back to Inbox; Archive -> back to Inbox."""
+    log.info("undo_action: reversing mode=%s uids=%d", mode, len(uids))
     M = connect(addr, pwd)
     try:
         M.select("INBOX")  # read-write
@@ -686,9 +739,10 @@ def undo_action(addr, pwd, uids, mode, progress=None):
             done += len(batch)
             if progress:
                 progress(done, total)
+        log.info("undo_action: completed, %d restored", done)
         return done
     finally:
         try:
             M.logout()
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("undo_action: logout failed (%s) — connection likely already closed", e)
