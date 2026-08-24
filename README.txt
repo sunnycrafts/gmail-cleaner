@@ -1,6 +1,11 @@
 GMAIL INBOX CLEANER  —  quick start
 ====================================
 
+I built this because my own Gmail inbox had thousands of emails from senders
+I didn't recognize and no easy way to see who was actually filling it up.
+This groups everything by sender so you can see the big offenders at a
+glance and clear them out in bulk, instead of deleting one email at a time.
+
 WHAT IT DOES
   Scans your Gmail inbox, groups every email by who sent it, and opens on a
   SUMMARY DASHBOARD: total emails, how few senders make up most of your inbox,
